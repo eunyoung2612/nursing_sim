@@ -44,6 +44,8 @@ def sidebar():
                 st.session_state["instructor"] = True
             if st.session_state.get("instructor"):
                 st.success("모든 장면 열림")
+                if st.button("AI 연결 테스트"):
+                    _connection_test()
 
 
 # ---------------------------------------------------------------- Solar
@@ -59,6 +61,24 @@ def _client():
     if not key:
         return None
     return _make_client(key, secret("SOLAR_BASE_URL", "https://api.upstage.ai/v1/solar"))
+
+
+def _connection_test():
+    """교수자용: 현재 설정과 사용 가능한 모델 이름을 보여줍니다."""
+    st.caption(f"주소: {secret('SOLAR_BASE_URL', '(없음)')}")
+    st.caption(f"모델: {secret('SOLAR_MODEL', '(없음)')}")
+    client = _client()
+    if client is None:
+        st.error("API 키가 없습니다.")
+        return
+    try:
+        names = sorted(m.id.replace("models/", "") for m in client.models.list())
+        st.success(f"연결 성공 · 사용 가능한 모델 {len(names)}개")
+        st.code("\n".join(n for n in names if "embed" not in n and "tts" not in n and "image" not in n))
+        if secret("SOLAR_MODEL") not in names:
+            st.warning("Secrets의 SOLAR_MODEL이 위 목록에 없습니다. 목록의 이름으로 바꾸세요.")
+    except Exception as e:
+        st.error(f"연결 실패: {e}")
 
 
 def solar_stream(messages, temperature=0.6):
