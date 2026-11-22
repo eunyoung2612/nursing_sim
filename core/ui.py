@@ -48,12 +48,17 @@ def sidebar():
 
 # ---------------------------------------------------------------- Solar
 @st.cache_resource
-def _client():
+def _make_client(key, base_url):
+    # 키·주소가 바뀌면 새 연결을 만듭니다 (Secrets 변경이 바로 반영되도록)
     from openai import OpenAI
+    return OpenAI(api_key=key, base_url=base_url)
+
+
+def _client():
     key = secret("UPSTAGE_API_KEY")
     if not key:
         return None
-    return OpenAI(api_key=key, base_url=secret("SOLAR_BASE_URL", "https://api.upstage.ai/v1/solar"))
+    return _make_client(key, secret("SOLAR_BASE_URL", "https://api.upstage.ai/v1/solar"))
 
 
 def solar_stream(messages, temperature=0.6):
@@ -72,7 +77,7 @@ def solar_stream(messages, temperature=0.6):
             if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
     except Exception as e:  # 네트워크·키 오류 등
-        yield f"⚠️ Solar API 오류: {e}"
+        yield f"⚠️ AI API 오류 ({secret('SOLAR_BASE_URL', 'upstage')}): {e}"
 
 
 # ---------------------------------------------------------------- 차트
