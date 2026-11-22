@@ -81,23 +81,50 @@ def _connection_test():
         st.error(f"연결 실패: {e}")
 
 
+def _models():
+    """기본 모델 + 예비 모델 목록 (Secrets의 SOLAR_FALLBACK_MODELS)."""
+    main = secret("SOLAR_MODEL", "solar-pro")
+    extra = secret("SOLAR_FALLBACK_MODELS", []) or []
+    if isinstance(extra, str):
+        extra = [x.strip() for x in extra.split(",") if x.strip()]
+    return [main] + [m for m in extra if m != main]
+
+
 def solar_stream(messages, temperature=0.6):
+    """AI 응답을 스트리밍. 일시적 오류(429·500·503)는 잠시 기다렸다가 다시 시도하고,
+    그래도 안 되면 예비 모델로 바꿔 시도합니다."""
+    import time
     client = _client()
     if client is None:
-        yield "⚠️ UPSTAGE_API_KEY가 설정되지 않았습니다. Streamlit의 Settings → Secrets를 확인하세요."
+        yield "⚠️ API 키가 설정되지 않았습니다. Streamlit의 Settings → Secrets를 확인하세요."
         return
-    try:
-        resp = client.chat.completions.create(
-            model=secret("SOLAR_MODEL", "solar-pro"),
-            messages=messages,
-            temperature=temperature,
-            stream=True,
-        )
-        for chunk in resp:
-            if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-    except Exception as e:  # 네트워크·키 오류 등
-        yield f"⚠️ AI API 오류 ({secret('SOLAR_BASE_URL', 'upstage')}): {e}"
+    last_err = None
+    for model in _models():
+        for attempt in range(3):
+            started = False
+            try:
+                resp = client.chat.completions.create(
+                    model=model, messages=messages, temperature=temperature, stream=True)
+                for chunk in resp:
+                    if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+                        started = True
+                        yield chunk.choices[0].delta.content
+                return
+            except Exception as e:  # 네트워크·키·한도 오류 등
+                last_err = e
+                if started:  # 답이 나오던 중 끊긴 경우
+                    yield "\n\n⚠️ 응답이 중간에 끊겼습니다. 다시 보내 주세요."
+                    return
+                code = getattr(e, "status_code", None)
+                if code in (429, 500, 502, 503, 504):
+                    time.sleep(2 * (attempt + 1))  # 2초, 4초, 6초 대기 후 재시도
+                    continue
+                break  # 404(모델 없음) 등은 다음 모델로
+    code = getattr(last_err, "status_code", "")
+    hint = {503: "AI 서버가 일시적으로 붐빕니다. 잠시 후 다시 보내 주세요.",
+            429: "무료 사용 한도에 걸렸습니다. 1분쯤 뒤 다시 보내 주세요.",
+            404: "모델 이름을 찾을 수 없습니다. 교수자 메뉴의 'AI 연결 테스트'로 확인하세요."}.get(code, "")
+    yield f"⚠️ AI 응답 오류 {code}. {hint}\n\n({last_err})"
 
 
 # ---------------------------------------------------------------- 차트
